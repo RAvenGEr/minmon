@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use crate::{Error, Result};
 
 const UPTIME_PATH: &str = "/proc/uptime";
@@ -17,28 +19,26 @@ fn read_system_uptime() -> Result<std::time::Duration> {
     Ok(std::time::Duration::from_secs_f64(uptime))
 }
 
-static mut START_TIME: Option<std::time::Instant> = None;
-static mut START_SYSTEM_UPTIME: Option<std::time::Duration> = None;
-
-static INIT: std::sync::Once = std::sync::Once::new();
+static START_TIME: OnceLock<std::time::Instant> = OnceLock::new();
+static START_SYSTEM_UPTIME: OnceLock<std::time::Duration> = OnceLock::new();
 
 pub fn system() -> std::time::Duration {
-    unsafe { START_SYSTEM_UPTIME }.unwrap() + process()
+    *START_SYSTEM_UPTIME.get().unwrap() + process()
 }
 
 pub fn process() -> std::time::Duration {
-    std::time::Instant::now().duration_since(unsafe { START_TIME }.unwrap())
+    std::time::Instant::now().duration_since(*START_TIME.get().unwrap())
 }
 
 pub fn init() -> Result<()> {
-    let mut res = Ok(());
-    INIT.call_once(|| unsafe {
-        START_TIME = Some(std::time::Instant::now());
-        let system_uptime = read_system_uptime();
-        match system_uptime {
-            Ok(system_uptime) => START_SYSTEM_UPTIME = Some(system_uptime),
-            Err(err) => res = Err(err),
+    _ = START_TIME.set(std::time::Instant::now());
+
+    let system_uptime = read_system_uptime();
+    match system_uptime {
+        Ok(system_uptime) => {
+            _ = START_SYSTEM_UPTIME.set(system_uptime);
+            Ok(())
         }
-    });
-    res
+        Err(err) => Err(err),
+    }
 }
